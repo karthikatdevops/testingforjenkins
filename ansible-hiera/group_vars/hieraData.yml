@@ -1,0 +1,6 @@
+#Used by the hieraDynInv.py file
+
+hieraFile: "/etc/hiera/merlin-hiera.yaml"
+dynInvEnv: ["cmpstkMerlinIngest"]
+dynInvServ: ["entityDataService"]
+dynInvServIgnore: ["oracle", "haproxy", "unuHazelcastServer"]

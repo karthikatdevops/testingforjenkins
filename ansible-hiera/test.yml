@@ -1,0 +1,24 @@
+---
+- name: Testing Ansible/Hiera Module
+  hosts: localhost
+
+  vars_prompt:
+  - name: gitUser
+    prompt: Comcast GitHub Username
+    private: no
+  - name: gitPass
+    prompt: Comcast GitHub Password
+    private: yes
+
+  tasks:
+  - name: Lookup
+    connection: local
+    hieraMod: option=lookup hieraFile=/etc/hiera/merlin-hiera.yaml service=entityDataService env=cmpstkMerlinIngest key="alive.check.force.up"
+
+  - name: ViewAll
+    connection: local
+    hieraMod: option=viewAll hieraFile=/etc/hiera/merlin-hiera.yaml service=entityDataService env=cmpstkMerlinIngest key="ds_vars" resolve=True
+
+  - name: ConfigFile
+    connection: local
+    hieraMod: option=configFile hieraFile=/etc/hiera/merlin-hiera.yaml service=entityDataService env=cmpstkMerlinIngest user="{{gitUser}}" pass="{{gitPass}}"

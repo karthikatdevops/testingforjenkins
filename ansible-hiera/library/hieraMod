@@ -1,0 +1,533 @@
+#!/usr/bin/env python
+
+# Morgan Wallace 2016
+
+from ansible.constants import mk_boolean
+from ansible.module_utils.basic import *
+import subprocess
+import requests
+import json
+import sys
+import yaml
+import re
+import os
+
+DOCUMENTATION = '''
+    module: hieraMod
+    short_description: Allows for key lookup in Compass's Hiera & creation of Config files
+
+    Module REQUIRES:
+        option (which action is desired - lookup or configFile)
+        env (environment to be used)
+        service (service to be used)
+        hieraFile (location of local Hiera hierarchy file)
+
+    ADDITIONAL variables may be required, depending on task.
+    Available options:
+        lookup
+            Optional:
+                key (key(s) to find value of, based on hierarchy)
+                    * Comma separated for multiple lookups
+                    * If not included, simply prints all keys associated with svc/env
+
+        viewAll
+            Needs:
+                key (key(s) to find value of on every level of hierarchy)
+                    * Comma separated for multiple lookups
+                resolve (boolean)
+                    * Indicates whether values containing Hiera variables (designated by this structure: %{hiera('keyToReplace')} ) should be resolved (filled in) or not
+
+        configFile
+            Needs either:
+                user (username for github) & pass (password for github)
+                file (file path for local copy of test.properties)
+
+
+'''
+EXAMPLES = '''
+Playbook:
+    * -v: Preferred level of verbosity to see output of module
+    * Module options (in yml file):
+        * hieraMod: option="lookup" env=<environment_name> service=<service_name> key=<key(s)>
+        * hieraMod: option="viewAll" env=<environment_name> service=<service_name> key=<key(s)> resolve="true"
+        * hieraMod: option="configFile" env=<environment_name> service=<service_name> user=<username> password=<password>
+        * hieraMod: option="configFile" env=<environment_name> service=<service_name> file=<filepath>
+
+Command Line:
+    * General format: ansible <hosts> -i <hostsfilepath> -c local -m hieraMod --args="option=<option> ...=..."
+        * Uses local connection due to location of Hiera repo - generally on local machine (where Ansible is being called), not on remote host
+    * Run:
+        * ansible localhost -i hosts -c local -m hieraMod --args="option=lookup env=ExampleEnvironmentName service=ExampleServiceName key=ExampleKey" -v
+        * ansible localhost -i hosts -c local -m hieraMod --args="option=viewAll env=ExampleEnvironmentName service=ExampleServiceName key=ExampleKey resolve=False" -v
+        * ansible localhost -i hosts -c local -m hieraMod --args="option=configFile env=ExampleEnvironmentName service=ExampleServiceName user=ExampleUsername pass=ExamplePassword" -v
+        * ansible localhost -i hosts -c local -m hieraMod --args="option=configFile env=ExampleEnvironmentName service=ExampleServiceName file=path/to/test.properties" -v
+'''
+
+
+class Hiera:
+    'Hiera class'
+
+    def __init__ (self, hieraBase, hieraFile, hieraConfig, hieraSVC, hieraENV, hieraHost):
+        self.hieraBase = hieraBase
+        self.hieraFile = hieraFile
+        self.hieraConfig = hieraConfig
+        self.service = hieraSVC
+        self.env = hieraENV
+        self.host = hieraHost
+
+        self.keyVals = {}
+        self.resolve = False
+        self.uniqueKeys = {}
+        self.dictsChecked = []
+        self.lookupErrors = []
+        self.varResolveErrors = []
+        self.pathErrors = []
+        self.blankYAML = []
+
+    #Set resolution flag to true
+    def setResolve (self):
+        self.resolve = True
+
+    def lookup(self, searchDict, key):
+        d = self.searchLower(searchDict, key)
+        if d == None:
+            d = {}
+            d[key] = "<%s> not found for this env/svc" % key
+            d['env'] = self.env
+            d['svc'] = self.service
+            self.lookupErrors.append(key)
+        return d
+
+    def searchLower (self, searchDict, key):
+        returned = {}
+        if searchDict.has_key(key):
+            returned[key] = searchDict[key]
+            return returned
+        else:
+            for item in searchDict:
+                if isinstance(searchDict[item], dict): #if there are sub-dicts, keep searching
+                    #self.dictsChecked.append(item)
+                    returned = self.searchLower(searchDict[item], key)
+                    if returned != None and returned.has_key(key):
+                        return returned
+
+    def searchLowerRef (self, searchDict, searchRef):
+        returned = {}
+        for item in searchDict:
+            if not (isinstance(searchDict[item], dict) or isinstance(searchDict[item], list)):
+                #logger.debug(str(searchDict[item]))
+                if searchRef in str(searchDict[item]):
+                    if not (returned.has_key(searchRef)):
+                        returned[searchRef] = []
+                    returned[searchRef].append(item+": "+searchDict[item])
+            elif isinstance(searchDict[item], dict): #if there are sub-dicts, keep searching
+                self.dictsChecked.append(item)
+                returned = self.searchLowerRef(searchDict[item], searchRef)
+                if returned != None and returned.has_key(searchRef):
+                    return returned
+        if returned != None and returned.has_key(searchRef):
+            return returned
+
+    def getVals (self, key):
+        self.keyVals[key] = {}
+        ignore = True
+        i = 0
+        if self.host != None:
+            ignore = False
+        while i < len(self.hieraConfig[':hierarchy']):
+            #Get path
+            self.keyVals[key][i+1] = {}
+            path = os.path.join(self.hieraBase, self.hieraConfig[':hierarchy'][i])
+            path = path.replace("%{hiera_env}", self.env)
+            path = path.replace("%{hiera_svc}", self.service)
+            check = None #if path contains hiera_host, but no host provided, set to falsify
+            if "%{hiera_host}" in path:							#if path calls for host, check to make sure it was passed
+                if not ignore:									#if it was passed, replace the term and add this path to the dict
+                    path = path.replace("%{hiera_host}", self.host)
+                    path = path + ".yaml"
+                    check = self.findKey(path, key, i+1)
+                    if check:
+                        self.keyVals[key][i+1]['Path'] = path
+                    else: #returned as None
+                        self.keyVals[key][i+1]['PATH ERROR'] = path
+                    self.findRef(path, key, i+1)
+                else: #do not check this path (needs hiera_host and none provided)
+                    self.keyVals[key][i+1]['PATH ERROR'] = path
+            else:
+                path = path + ".yaml"
+                check = self.findKey(path, key, i+1)
+                if not check: #returned as None
+                    self.keyVals[key][i+1]['PATH ERROR'] = path
+                else:
+                    self.keyVals[key][i+1]['Path'] = path
+                self.findRef(path, key, i+1)
+            i += 1
+        if self.resolve:
+            self.resolveDictVariables(self.keyVals)
+
+    def getUniqueKeys (self):
+        ignore = True
+        i = 0
+        if self.host != None:
+            ignore = False
+        while i < len(self.hieraConfig[':hierarchy']):
+            #Get path
+            path = os.path.join(self.hieraBase, self.hieraConfig[':hierarchy'][i])
+            path = path.replace("%{hiera_env}", self.env)
+            path = path.replace("%{hiera_svc}", self.service)
+            check = None #if path contains hiera_host, but no host provided, set to falsify
+            if "%{hiera_host}" in path:							#if path calls for host, check to make sure it was passed
+                if not ignore:									#if it was passed, replace the term and add this path to the dict
+                    path = path.replace("%{hiera_host}", self.host)
+                    path = path + ".yaml"
+                    check = self.readKeys(path)
+                    if not check: #returned as None
+                        self.pathErrors.append(path)
+                #else: do not check this path
+            else:
+                path = path + ".yaml"
+                check = self.readKeys(path)
+                if not check: #returned as None
+                    if path not in self.pathErrors:
+                        self.pathErrors.append(path)
+            i += 1
+        self.resolveDictVariables(self.uniqueKeys)
+
+    def readKeys (self, path):
+        try:
+            f = open(path, 'r')
+            yamlDict = yaml.load(f)
+            f.close()
+            try:
+                for key in yamlDict:
+                    if isinstance(yamlDict[key], dict):
+                        if key in self.uniqueKeys:
+                            prior = yamlDict[key]
+                            prior.update(self.uniqueKeys[key]) #update lower hierarchy's dict with values from higher
+                            self.uniqueKeys[key] = prior
+                        else:
+                            self.uniqueKeys[key] = yamlDict[key]
+                    elif isinstance(yamlDict[key], list):
+                        if key in self.uniqueKeys: #combine lists
+                            if key == "depends": #check after seeing if already in self.uniqueKeys (if not, no special logic to add)
+                                #print "Prior listing: ", self.uniqueKeys[key]
+                                for sublist in yamlDict[key]: #for each grouping
+                                    if not any(sublist[0] in i for i in self.uniqueKeys[key]):
+                                        self.uniqueKeys[key].append(sublist)
+                            else:
+                                curItems = set(self.uniqueKeys[key])
+                                potentialItems = set(yamlDict[key])
+                                #only adding items to uniqueKeys if they are not already a part of the list
+                                addItems = potentialItems - curItems
+                                newItems = list(curItems) + list(addItems)
+                                self.uniqueKeys[key] = newItems
+                        else:
+                            self.uniqueKeys[key] = yamlDict[key]
+                    elif key not in self.uniqueKeys:
+                        self.uniqueKeys[key] = yamlDict[key]
+                return True
+            except TypeError:
+                if path not in self.blankYAML:
+                    self.blankYAML.append(path)
+                return False
+        except IOError:
+            if path not in self.pathErrors:
+                self.pathErrors.append(path)
+            return False
+
+    def resolveDictVariables (self, searchDict):
+        for key in list(searchDict):
+            if isinstance(searchDict[key], str): # Do any substitutions
+                searchDict[key] = self.substitute(searchDict[key])
+            elif isinstance(searchDict[key], dict):
+                self.resolveDictVariables(searchDict[key])
+            elif isinstance(searchDict[key], list):
+                self.resolveListVariables(searchDict[key])
+
+    def resolveListVariables (self, searchList):
+        for index, item in enumerate(searchList):
+            if isinstance(item, str): # Do any substitutions
+                searchList[index] = self.substitute(item)
+            elif isinstance (item, dict):
+                self.resolveDictVariables(searchList[index])
+            elif isinstance (item, list):
+                self.resolveListVariables(searchList[index])
+
+    def substitute (self, string):
+        # Handle any hiera_svc substitutions
+        string = re.sub(r'%\{hiera_svc\}', self.service, string)
+        # Handle any hiera_env substitutions
+        string = re.sub(r'%\{hiera_env\}', self.env, string)
+        # Handle any hiera_host substitutions
+        if self.host != None:
+            string = re.sub(r'%\{hiera_host\}', self.host, string)
+        # Handle any hiera variable substitutions
+        matches = re.finditer(r'%\{hiera\(\'.*?\'\)}', string)
+        new = string
+        for match in matches:
+            start = match.start()+9 #9 extraneous characters at start of variable substitution: %{hiera('
+            end = match.end()-3 #3 extraneous characters at end of variable substitution: ')}
+            variableName = string[start:end] #grab actual string
+            #print variableName
+            returned = self.lookupResolve(variableName)
+            if not returned == None:
+                new = re.sub(r'%\{hiera\(\'.*?\'\)}', str(returned), new, 1)
+            else:
+                new = re.sub(r'%\{hiera\(\'.*?\'\)}', "", new, 1)
+            #logger.info('      %d hiera variables found in %s' % (numMatch, string))
+        if len(re.findall(r'%\{hiera\(\'.*?\'\)}', new)) != 0: #variables within variables
+            new = self.substitute(new)
+        # Handle any encryptions
+        if "ENC[" in new:
+            try:
+                pubkey = self.hieraConfig[":eyaml"][":pkcs7_public_key"]
+                privkey = self.hieraConfig[":eyaml"][":pkcs7_private_key"]
+                #Check key validity (files exist) before trying to run below command
+                if (os.path.isfile(pubkey) and os.path.isfile(privkey)):
+                    cmd = "eyaml decrypt -s %s --pkcs7-private-key=%s --pkcs7-public-key=%s" % (new, privkey, pubkey)
+                    #print cmd
+                    commandoutput = subprocess.check_output(shlex.split(cmd))
+                    #print "Command output: ", commandoutput
+                    new = re.sub(r'ENC\[.*\]', commandoutput.rstrip()[1:-1], new)
+                else: #ignore all ENC keys and proceed as normal
+                    new = new
+            except KeyError:
+                new = new
+        return new
+
+    def findRef (self, path, key, level):
+        try:
+            f = open(path, 'r')
+            yamlDict = yaml.load(f)
+            f.close()
+            searchRef = "%{hiera('"+key+"')}"
+            #logger.debug('      '+searchRef+'\n')
+            d = self.searchLowerRef(yamlDict,searchRef)
+            if d == None:
+                self.keyVals[key][level]['Reference'] = "NOT REFERENCED"
+            else:
+                self.keyVals[key][level]['Reference'] = d[searchRef]
+            return True
+        except IOError:
+            if path not in self.pathErrors:
+                self.pathErrors.append(path)
+
+    def findKey (self, path, key, level):
+        try:
+            f = open(path, 'r')
+            yamlDict = yaml.load(f)
+            f.close()
+            d = self.searchLower(yamlDict, key)
+            if d == None:
+                self.keyVals[key][level]['Value'] = "NOT SET"
+            else:
+                self.keyVals[key][level]['Value'] = d[key]
+            return True
+        except IOError:
+            if path not in self.pathErrors:
+                self.pathErrors.append(path)
+
+    def lookupResolve(self, key):
+        if "." in key:
+            try:
+                result = reduce(dict.get, key.split("."), self.uniqueKeys)
+                if result == None:
+                    self.varResolveErrors.append(key)
+            except TypeError:
+                if self.uniqueKeys.has_key(key):
+                    result = self.uniqueKeys[key]
+                else:
+                    result = None
+                    self.varResolveErrors.append(key)
+        else:
+            if self.uniqueKeys.has_key(key):
+                result = self.uniqueKeys[key]
+            else:
+                result = None
+                self.varResolveErrors.append(key)
+        return result
+
+    def writeFinalConfigFile (self):
+        d = {}
+        #d['configReplace'] = []
+        try:
+            origFin = open(self.origPath, 'r')
+            path = "/tmp/DS_Configuration.properties"
+            fout = open(path, 'w+')
+            subs = 0
+            blanks = []
+            num = 0
+            for line in origFin:
+                if "#" not in line:
+                    if "SUBSTITUTED_BY_CAPISTRANO" in line:
+                        num += 1
+                        #do lookup here after grabbing key value
+                        keys = line.split('=')
+                        key = keys[0]
+                        replacement = self.lookup(self.uniqueKeys, key)
+                        #d['configReplace'].append("Should replace value for %s with %s" % (key, replacement[key]))
+                        if not "not found" in str(replacement[key]):
+                            subs += 1
+                            line = line.replace("SUBSTITUTED_BY_CAPISTRANO", str(replacement[key]))
+                        else:
+                            blanks.append(key)
+                            line = line.replace("SUBSTITUTED_BY_CAPISTRANO", "")
+                fout.write(line)
+            origFin.close()
+            fout.close()
+            d['success'] = "true"
+            d['path'] = path
+            d['Total Subs'] = num
+            d['Valid Subs'] = subs
+            d['Left Empty'] = blanks
+            os.remove(self.origPath)
+            return d
+        except IOError:
+            return False
+
+    def getConfig (self, user, password):
+        url = "https://github.comcast.com/raw/merlin/%s/master/webapp/src/main/resources/test.properties" % self.service
+        r = requests.get(url, auth=(user, password), headers={'Content-Type': 'application/json'})
+        if r.status_code == 200:
+            self.origPath = "/tmp/PreConfig.properties"
+            try:
+                fout = open(self.origPath, 'w+')
+                fout.write(r.text)
+                fout.close()
+            except IOError:
+                return False
+        return r.status_code
+
+    def getConfigF (self, filepath):
+        try:
+            fin = open(filepath, 'r')
+            self.origPath = "/tmp/PreConfig.properties"
+            fout = open(self.origPath, 'w+')
+            for line in fin:
+                fout.write(line)
+            fout.close()
+            return True
+        except IOError:
+            return False
+
+def splitter (item):
+    if "," in item:
+        return item.split(',')
+    else:
+        return [item]
+
+def main ():
+    module = AnsibleModule ( argument_spec = {
+                            'option':       {'required': True, 'type': 'str'},
+                            'service':      {'required': True, 'type': 'str'},
+                            'env':          {'required': True, 'type': 'str'},
+                            'hieraFile':    {'required': True, 'type': 'str'},
+                            'key':          {'type': 'str'},
+                            'host':         {'type': 'str'},
+                            'user':         {'type': 'str'},
+                            'pass':         {'type': 'str'},
+                            'file':         {'type': 'str'},
+                            'resolve':      {'type': 'bool'}}
+                            )
+
+    service = module.params['service']
+    option = module.params['option']
+    env = module.params['env']
+    host = module.params['host']
+    key = module.params['key']
+    user = module.params['user']
+    password = module.params['pass']
+    confFile = module.params['file']
+    hieraFile = module.params['hieraFile']
+    resolveFlag = module.params['resolve']
+
+    try:
+        f = open(hieraFile, 'r')
+        yamlDict = yaml.load(f)
+        f.close()
+    except IOError:
+        message = "No file found at location %s" % hieraFile
+        module.fail_json(msg=message)
+
+    if option == "lookup":
+        newHiera = Hiera(hieraBase=yamlDict[':eyaml'][':datadir'], hieraFile=hieraFile, hieraConfig=yamlDict, hieraSVC=service, hieraENV=env, hieraHost=host)
+
+        #Get keys loaded
+        newHiera.getUniqueKeys()
+        if key != None:
+            key = splitter(key)
+            if len(key) > 1:
+                returnedJSON = []
+                for item in key:
+                    returnedJSON.append(newHiera.lookup(newHiera.uniqueKeys, item))
+            else:
+                returnedJSON = newHiera.lookup(newHiera.uniqueKeys, key[0])
+        else:
+            returnedJSON = newHiera.uniqueKeys
+        module.exit_json(option = option, uniqueKeysPathErrors = newHiera.pathErrors, lookupErrors = newHiera.lookupErrors, returned = returnedJSON)
+    elif option == "configFile":
+        newHiera = Hiera(hieraBase=yamlDict[':eyaml'][':datadir'], hieraFile=hieraFile, hieraConfig=yamlDict, hieraSVC=service, hieraENV=env, hieraHost=host)
+
+        #Get keys loaded
+        newHiera.getUniqueKeys()
+        if user != None and password != None:
+            requestReturn = newHiera.getConfig(user, password)
+            if requestReturn == 200:
+                returnedJSON = newHiera.writeFinalConfigFile()
+                if returnedJSON == False:
+                    message = "Error creating/opening PreConfig or DS_Configuration file in writeFinalConfigFile"
+                    module.fail_json(msg=message)
+            elif requestReturn == False:
+                message = "Error creating/opening PreConfig file in getConfig"
+                module.fail_json(msg=message)
+            else:
+                message = "non-200 code returned from get request to github for service config file: %s" % requestReturn
+                module.fail_json(msg=message)
+        elif confFile != None:
+            requestReturn = newHiera.getConfigF(confFile)
+            if requestReturn:
+                returnedJSON = newHiera.writeFinalConfigFile()
+                if returnedJSON == False:
+                    message = "Error creating/opening PreConfig or DS_Configuration file in writeFinalConfigFile"
+                    module.fail_json(msg=message)
+            else:
+                message = "Error opening PreConfig file in getConfigF: %s" % confFile
+                module.fail_json(msg=message)
+        else:
+            message = "user, password, and/or filepath was not passed"
+            module.fail_json(msg=message)
+        module.exit_json(option = option, uniqueKeysPathErrors = newHiera.pathErrors, returned = returnedJSON)
+    elif option == "viewAll":
+        newHiera = Hiera(hieraBase=yamlDict[':eyaml'][':datadir'], hieraFile=hieraFile, hieraConfig=yamlDict, hieraSVC=service, hieraENV=env, hieraHost=host)
+        if key != None and resolveFlag != None:
+            key = splitter(key)
+            if resolveFlag:
+                newHiera.setResolve()
+                newHiera.getUniqueKeys()
+            for item in key:
+                newHiera.getVals(item)
+            returnedJSON = newHiera.keyVals
+            if resolveFlag:
+                module.exit_json(option = option, resolveErrors = newHiera.varResolveErrors,  uniqueKeysPathErrors = newHiera.pathErrors, returned = returnedJSON)
+            else:
+                module.exit_json(option = option, uniqueKeysPathErrors = newHiera.pathErrors, returned = returnedJSON)
+        elif key == None and resolve != None:
+            message = "Missing key argument for %s" % module.params['option']
+            module.fail_json(msg=message)
+        elif resolve == None and key != None:
+            message = "Missing resolve argument for %s" % module.params['option']
+            module.fail_json(msg=message)
+        elif key == None and resolve == None:
+            message = "Missing key & resolve argument for %s" % module.params['option']
+            module.fail_json(msg=message)
+    else:
+        message = "incorrect option passed to module: %s" % module.params['option']
+        module.fail_json(msg=message)
+
+
+
+
+
+
+if __name__ == "__main__":
+    main()
