@@ -1,0 +1,124 @@
+No config file found; using defaults
+Loaded callback minimal of type stdout, v2.0
+<127.0.0.1> ESTABLISH LOCAL CONNECTION FOR USER: kmanne001c
+<127.0.0.1> EXEC /bin/sh -c '( umask 77 && mkdir -p "` echo $HOME/.ansible/tmp/ansible-tmp-1475161958.33-212135052490092 `" && echo ansible-tmp-1475161958.33-212135052490092="` echo $HOME/.ansible/tmp/ansible-tmp-1475161958.33-212135052490092 `" ) && sleep 0'
+<127.0.0.1> ESTABLISH LOCAL CONNECTION FOR USER: kmanne001c
+<127.0.0.1> EXEC /bin/sh -c '( umask 77 && mkdir -p "` echo $HOME/.ansible/tmp/ansible-tmp-1475161958.33-44071266091078 `" && echo ansible-tmp-1475161958.33-44071266091078="` echo $HOME/.ansible/tmp/ansible-tmp-1475161958.33-44071266091078 `" ) && sleep 0'
+<127.0.0.1> PUT /var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/tmp0dcGCz TO /Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-212135052490092/hieraMod
+<127.0.0.1> PUT /var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/tmpkz7hR0 TO /Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-44071266091078/hieraMod
+<127.0.0.1> EXEC /bin/sh -c 'LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LC_MESSAGES=en_US.UTF-8 /usr/bin/python /Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-44071266091078/hieraMod; rm -rf "/Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-44071266091078/" > /dev/null 2>&1 && sleep 0'
+<127.0.0.1> EXEC /bin/sh -c 'LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LC_MESSAGES=en_US.UTF-8 /usr/bin/python /Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-212135052490092/hieraMod; rm -rf "/Users/kmanne001c/.ansible/tmp/ansible-tmp-1475161958.33-212135052490092/" > /dev/null 2>&1 && sleep 0'
+An exception occurred during task execution. The full traceback is:
+Traceback (most recent call last):
+  File "/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py", line 533, in <module>
+    main()
+  File "/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py", line 476, in main
+    returnedJSON = newHiera.writeFinalConfigFile()
+  File "/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py", line 383, in writeFinalConfigFile
+    os.remove(self.origPath)
+OSError: [Errno 2] No such file or directory: '/tmp/PreConfig.properties'
+localhost | FAILED! => {
+    "changed": false, 
+    "failed": true, 
+    "invocation": {
+        "module_name": "hieraMod"
+    }, 
+    "module_stderr": "Traceback (most recent call last):\n  File \"/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py\", line 533, in <module>\n    main()\n  File \"/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py\", line 476, in main\n    returnedJSON = newHiera.writeFinalConfigFile()\n  File \"/var/folders/3f/8p_j36qx1c7_3z541rh__39hds2s_4/T/ansible__2NCMz/ansible_module_hieraMod.py\", line 383, in writeFinalConfigFile\n    os.remove(self.origPath)\nOSError: [Errno 2] No such file or directory: '/tmp/PreConfig.properties'\n", 
+    "module_stdout": "", 
+    "msg": "MODULE FAILURE", 
+    "parsed": false
+}
+127.0.0.1 | SUCCESS => {
+    "changed": false, 
+    "invocation": {
+        "module_args": {
+            "env": "cmpstkMerlinIngest", 
+            "file": null, 
+            "hieraFile": "/Users/kmanne001c/git/mopsCompassHiera/merlin-hiera.yaml", 
+            "host": null, 
+            "key": null, 
+            "option": "configFile", 
+            "pass": "karthik-1991", 
+            "resolve": null, 
+            "service": "entityDataService", 
+            "user": "kmanne001c"
+        }, 
+        "module_name": "hieraMod"
+    }, 
+    "option": "configFile", 
+    "returned": {
+        "Left Empty": [
+            "auth.admin.access.url", 
+            "auth.admin.identity.url", 
+            "combine.commons.default.ownerid", 
+            "merlin.default.account", 
+            "service.allowedHostNames", 
+            "service.instance", 
+            "service.readOnly", 
+            "service.environment", 
+            "service.trace.mail.host", 
+            "service.trace.mail.bufferSize", 
+            "service.trace.file.path", 
+            "service.rmi.port", 
+            "service.jmx.port", 
+            "db.url", 
+            "db.username", 
+            "db.encryptedPassword", 
+            "db.sequence.url", 
+            "db.sequence.user", 
+            "db.sequence.password", 
+            "alive.check.force.up", 
+            "reaper.notification.enabled", 
+            "reaper.notification.maxAge", 
+            "cluster.enabled", 
+            "cluster.name", 
+            "cluster.multicast.address", 
+            "cluster.multicast.port", 
+            "cluster.heartbeat.timeout", 
+            "cache.L1.maximum.size", 
+            "cache.L1.enabled", 
+            "cache.L2.maximum.size.total", 
+            "cache.L2.enabled", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentProgram", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentEntityTagAssociation", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentTag", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.image.impl.data.PersistentMainImageFile", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.image.impl.data.PersistentMainImageType", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentProgramTeamAssociation", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentRelatedProgram", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentCredit", 
+            "cache.L2.maximum.size.com.theplatform.data.tv.entity.impl.data.PersistentPerson", 
+            "cache.L2.maximum.size", 
+            "entityDataService.media.service.base.url", 
+            "entityDataService.entity.service.base.url", 
+            "entityDataService.linear.service.base.url", 
+            "entityDataService.id.service.base.url", 
+            "entityDataService.program.query.server.url", 
+            "entityDataService.person.query.server.url", 
+            "entityDataService.sportsTeam.query.server.url", 
+            "entityDataService.mainImages.filterTypeIds", 
+            "auth.management.status.enabled", 
+            "entityDataService.pma.default.media.id.account.guid", 
+            "entityDataService.redis.hosts", 
+            "entityDataService.redis.password", 
+            "entityDataService.syncWithMonster", 
+            "entityDataService.monsterEntity.nosql.db.url", 
+            "entityDataService.monsterEntity.nosql.db.port", 
+            "entityDataService.monsterEntity.nosql.db.name"
+        ], 
+        "Total Subs": 57, 
+        "Valid Subs": 0, 
+        "path": "/tmp/DS_Configuration.properties", 
+        "success": "true"
+    }, 
+    "uniqueKeysPathErrors": [
+        "/etc/hiera/data/env_svc/cmpstkMerlinIngest/entityDataService.yaml", 
+        "/etc/hiera/data/env/cmpstkMerlinIngest.yaml", 
+        "/etc/hiera/data/env_group/cmpstkMerlinIngest.yaml", 
+        "/etc/hiera/data/stage_group/cmpstkMerlinIngest.yaml", 
+        "/etc/hiera/data/svc/entityDataService.yaml", 
+        "/etc/hiera/data/svc_group/entityDataService.yaml", 
+        "/etc/hiera/data/dc_group/cmpstkMerlinIngest.yaml", 
+        "/etc/hiera/data/common.yaml"
+    ]
+}
